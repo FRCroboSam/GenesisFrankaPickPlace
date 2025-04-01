@@ -1,137 +1,94 @@
-#TODO CHECK IMPORTS SEE IF THIS THING WORKS 
-#TODO: Also try to use the mpi4py thing if this has problems
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import rl_modules
 from rl_modules.ddpg_models import DDPG_Actor, DDPG_Critic
-from her_modules.replay_buffer import replay_buffer
+from her_modules.replay_buffer import ReplayBuffer
+from rl_modules.normalizer import Normalizer
 class DDPG_HER_AGENT:
     def __init__(self, env_params, env, device, checkpoint_path=None, load=False):
         self.device = device
         self.env_params = env_params
         self.env = env
         
-        # Initialize networks
         self.actor = DDPG_Actor(env_params).to(device)
         self.critic = DDPG_Critic(env_params).to(device)
         self.actor_target = DDPG_Actor(env_params).to(device)
         self.critic_target = DDPG_Critic(env_params).to(device)
         
-        # Initialize targets
         self.hard_update(self.actor, self.actor_target)
         self.hard_update(self.critic, self.critic_target)
         
-        # Optimizers
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=1e-3)
         self.critic_optim = optim.Adam(self.critic.parameters(), lr=1e-3)
         
-        # Replay buffer with HER
-        self.buffer = replay_buffer(
-            env_params=env_params,
-            buffer_size=int(1e6),
-            sample_func=self._sample_her_transitions
-        )
+        self.buffer = ReplayBuffer(env_params, buffer_size=int(1e6), device=device)
         
-        # Training parameters
         self.batch_size = 256
         self.gamma = 0.98
         self.tau = 0.05
         self.checkpoint_path = checkpoint_path
+        self.clip_range = 5
+        
+        self.o_norm = Normalizer(size=env_params['obs'], default_clip_range=self.clip_range)
+        self.g_norm = Normalizer(size=env_params['goal'], default_clip_range=self.clip_range)
         
         if load:
             self.load_checkpoint()
 
-    def _sample_her_transitions(self, episode_batch, batch_size):
-        """HER sampling with explicit key names"""
-        T = self.env_params['max_timesteps']
-        rollout_batch_size = episode_batch['state'].shape[0]
-        
-        # Select random episodes and timesteps
-        episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)
-        t_samples = np.random.randint(T, size=batch_size)
-        
-        transitions = {
-            'state': episode_batch['state'][episode_idxs, t_samples].copy(),
-            'achieved_goal': episode_batch['achieved_goal'][episode_idxs, t_samples].copy(),
-            'desired_goal': episode_batch['desired_goal'][episode_idxs, t_samples].copy(),
-            'action': episode_batch['action'][episode_idxs, t_samples].copy(),
-            'next_state': episode_batch['next_state'][episode_idxs, t_samples].copy(),
-            'next_achieved_goal': episode_batch['next_achieved_goal'][episode_idxs, t_samples].copy(),
-            'done': episode_batch['done'][episode_idxs, t_samples].copy()
-        }
-        
-        # HER: Relabel goals
-        her_indexes = np.where(np.random.uniform(size=batch_size) < 0.8)[0]
-        future_offset = (np.random.uniform(size=batch_size) * (T - t_samples)).astype(int)
-        future_t = (t_samples + future_offset)[her_indexes]
-        future_ag = episode_batch['achieved_goal'][episode_idxs[her_indexes], future_t]
-        transitions['desired_goal'][her_indexes] = future_ag
-        
-        # Compute rewards
-        transitions['reward'] = np.expand_dims(
-            
-            self.env.compute_reward(transitions['next_achieved_goal'], transitions['desired_goal']), 
-            axis=1
-        )
-        
-        return transitions
-
-    def store_transition(self, state, action, reward, next_state, desired_goal, done):
-        """Store transition with all necessary components including reward"""
-        episode_batch = {
-            'state': np.array([state]),
-            'action': np.array([action]),
-            'reward': np.array([[reward]]),  # Now storing reward
-            'next_state': np.array([next_state['observation']]),  # Added next_state
-            'achieved_goal': np.array([next_state['achieved_goal']]),
-            'next_achieved_goal': np.array([next_state['achieved_goal']]),  # For HER
-            'desired_goal': np.array([desired_goal]),
-            'done': np.array([[done]])
-        }
-        self.buffer.store_episode(episode_batch)
-
-    def select_action(self, state, desired_goal, train_mode=True):
-        """Select action with explicit inputs"""
-        print("STATE SHAPE: " + str(state.shape))
-        print(state)
-        print("DEVICE IS: " + str(self.device))
+    def select_action(self, state, goal, train_mode=True):
         with torch.set_grad_enabled(train_mode):
-            # state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            # goal_tensor = torch.FloatTensor(desired_goal).unsqueeze(0).to(self.device)
-            input_tensor = torch.cat([state, desired_goal], dim=-1)
-            actions = self.actor(input_tensor)#.cpu().data.numpy().flatten()
-            
+            input_tensor = torch.cat([state, goal], dim=-1)
+            action = self.actor(input_tensor)
             if train_mode:
-                # Generate noise directly on the same device as actions
-                noise = torch.randn_like(actions) * 0.1
-                actions = torch.clamp(actions + noise, -1, 1)
-            
-            # Return a tensor with original batch dimension
-            return actions  # shape [10, 4]
+                noise = torch.randn_like(action) * 0.1
+                action = torch.clamp(action + noise, -1, 1)
+            return action
+    
+    #shape of mb -> (batch size, time_steps, feature dim)
+    def update_normalizer(self, mb):
+        mb_obs, mb_ag, mb_g, mb_actions = mb
+        mb_obs_next = mb_obs[:, 1:, :]  #future observation is just the observation at the next time step
+        mb_ag_next = mb_ag[:, 1:, :]
+        num_transitions = mb_actions.shape[1]
+        buffer_temp = {'obs': mb_obs, 
+                       'ag': mb_ag,
+                       'g': mb_g, 
+                       'actions': mb_actions, 
+                       'obs_next': mb_obs_next,
+                       'ag_next': mb_ag_next,
+                       }
+        obs, g = self.buffer.sample_for_normalization(buffer_temp)
+        #TODO Consider adding some preprocess for obs and g
+        self.o_norm.update(obs)
+        self.g_norm.update(g)
+        # recompute the stats
+        self.o_norm.recompute_stats()
+        self.g_norm.recompute_stats()
+        
+        
 
     def train(self):
-        """Train using explicit key names"""
+        # TODO: CHECK THIS IS CORRECT< MAKE SURE IT DOES HER TRANSITIONS AND ALSO DO NORMALIZATRION
         transitions = self.buffer.sample(self.batch_size)
         
-        # Convert to tensors
-        state = torch.FloatTensor(transitions['state']).to(self.device)
-        action = torch.FloatTensor(transitions['action']).to(self.device)
-        reward = torch.FloatTensor(transitions['reward']).to(self.device)
-        next_state = torch.FloatTensor(transitions['next_state']).to(self.device)
-        desired_goal = torch.FloatTensor(transitions['desired_goal']).to(self.device)
-        done = torch.FloatTensor(transitions['done']).to(self.device)
+        obs = torch.FloatTensor(transitions['obs']).to(self.device)
+        ag = torch.FloatTensor(transitions['ag']).to(self.device)
+        g = torch.FloatTensor(transitions['g']).to(self.device)
+        actions = torch.FloatTensor(transitions['actions']).to(self.device)
+        obs_next = torch.FloatTensor(transitions['obs_next']).to(self.device)
+        ag_next = torch.FloatTensor(transitions['ag_next']).to(self.device)
+        rewards = torch.FloatTensor(transitions['r']).to(self.device)
         
         # Critic update
         with torch.no_grad():
-            next_input = torch.cat([next_state, desired_goal], dim=-1)
-            target_action = self.actor_target(next_input)
-            target_Q = self.critic_target(next_input, target_action)
-            target_Q = reward + (1 - done) * self.gamma * target_Q
+            next_input = torch.cat([obs_next, g], dim=-1)
+            target_actions = self.actor_target(next_input)
+            target_Q = self.critic_target(next_input, target_actions)
+            target_Q = rewards + (1 - (rewards == 0).float()) * self.gamma * target_Q
             
-        current_input = torch.cat([state, desired_goal], dim=-1)
-        current_Q = self.critic(current_input, action)
+        current_input = torch.cat([obs, g], dim=-1)
+        current_Q = self.critic(current_input, actions)
         critic_loss = nn.MSELoss()(current_Q, target_Q)
         
         self.critic_optim.zero_grad()
@@ -146,15 +103,13 @@ class DDPG_HER_AGENT:
         actor_loss.backward()
         self.actor_optim.step()
         
-        # Update targets
         self.soft_update(self.actor, self.actor_target)
         self.soft_update(self.critic, self.critic_target)
         
         return actor_loss.item(), critic_loss.item()
 
-    def soft_update(self, local_model, target_model):
-        """Soft update model parameters"""
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+    def soft_update(self, local, target):
+        for target_param, local_param in zip(target.parameters(), local.parameters()):
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
 
     def hard_update(self, source, target):

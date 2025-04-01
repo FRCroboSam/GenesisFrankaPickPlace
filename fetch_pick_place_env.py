@@ -138,8 +138,10 @@ class FrankaPickPlaceDDPG_Env:
         goal_pos = goal_pos.squeeze(0)
         
         cube_distance = cube_pos - gripper_pos
-        
-        grip_midpoint = gripper_pos[:, 1]
+        if gripper_pos.ndim == 1:
+            grip_midpoint = gripper_pos[1]  # Single env: direct index
+        else:
+            grip_midpoint = gripper_pos[:, 1]  # Multi-env: slice
         lfinger_disp = (left_pos[:, 1] - grip_midpoint).unsqueeze(-1)  # Will be negative
         rfinger_disp = (right_pos[:, 1] - grip_midpoint).unsqueeze(-1)  # Will be positive
 
