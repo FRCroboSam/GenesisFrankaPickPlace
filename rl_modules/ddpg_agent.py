@@ -5,6 +5,11 @@ import numpy as np
 from rl_modules.ddpg_models import DDPG_Actor, DDPG_Critic
 from her_modules.replay_buffer import ReplayBuffer
 from rl_modules.normalizer import Normalizer
+
+
+
+#TODO: REMOVe all the unnecessary print statements 
+#   figure out why reward isn't improving: mmore normalization?
 class DDPG_HER_AGENT:
     def __init__(self, env_params, env, device, checkpoint_path=None, load=False):
         self.device = device
@@ -50,7 +55,9 @@ class DDPG_HER_AGENT:
         mb_obs, mb_ag, mb_g, mb_actions = mb
         mb_obs_next = mb_obs[:, 1:, :]  #future observation is just the observation at the next time step
         mb_ag_next = mb_ag[:, 1:, :]
+        #TODO: FIGURE OUT WHY MB ACTIONS SHAPE IS (2, 1, 15, 4) instead of (2, 51, 15, 4)
         num_transitions = mb_actions.shape[1]
+        print("NUM TRANSITIONS: " + str(num_transitions))
         buffer_temp = {'obs': mb_obs, 
                        'ag': mb_ag,
                        'g': mb_g, 

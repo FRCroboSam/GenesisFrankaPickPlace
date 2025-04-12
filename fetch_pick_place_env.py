@@ -132,33 +132,38 @@ class FrankaPickPlaceDDPG_Env:
         cube_pos = (self.cube.get_pos())
         goal_pos = self.goal_target.get_pos()
         
-        # Convert to numpy arrays
-        gripper_pos = gripper_pos.squeeze(0)
-        cube_pos = cube_pos.squeeze(0)
-        goal_pos = goal_pos.squeeze(0)
+        # print("gripper_pos shape:", gripper_pos.shape)       # Expected shape: (3,) or (batch_size, 3)
+        # print("cube_pos shape:", cube_pos.shape)             # Expected shape: (3,) or (batch_size, 3)
+        # print("AFTER")
+        
+        # Convert to numpy arrays  -> this removes [1,3] -> [3]
+        # gripper_pos = gripper_pos.squeeze(0)
+        # cube_pos = cube_pos.squeeze(0)
+        # goal_pos = goal_pos.squeeze(0)
+        
+        
         
         cube_distance = cube_pos - gripper_pos
-        if gripper_pos.ndim == 1:
-            grip_midpoint = gripper_pos[1]  # Single env: direct index
-        else:
-            grip_midpoint = gripper_pos[:, 1]  # Multi-env: slice
+        
+        grip_midpoint = gripper_pos[:, 1]  # Multi-env: slice
         lfinger_disp = (left_pos[:, 1] - grip_midpoint).unsqueeze(-1)  # Will be negative
         rfinger_disp = (right_pos[:, 1] - grip_midpoint).unsqueeze(-1)  # Will be positive
 
-        print("GRIPPER POS: " + str(gripper_pos))
-        print("GRIP MIDPOINT: " + str(grip_midpoint))
-        print("CUBE POS: " + str(cube_pos))
-        print("CUBE DISTANCE: " + str(cube_distance))
-        print("R FINGER DISP: " + str(rfinger_disp))
-        # The observation includes everything except the desired goal
-    
         observation = torch.cat([
-            gripper_pos,  # Gripper position (3)
-            cube_pos,     # Cube position (3)
-            cube_distance, #distance cube to grippers
+            gripper_pos,      # Gripper position (3)
+            cube_pos,         # Cube position (3)
+            cube_distance,    # Distance cube to grippers
             rfinger_disp,
             lfinger_disp
         ], dim=-1)
+        # print("gripper_pos shape:", gripper_pos.shape)       # Expected shape: (3,) or (batch_size, 3)
+        # print("cube_pos shape:", cube_pos.shape)             # Expected shape: (3,) or (batch_size, 3)
+        # print("cube_distance shape:", cube_distance.shape)   # Expected shape: (1,) or (batch_size, 1)
+        # print("rfinger_disp shape:", rfinger_disp.shape)     # Expected shape: (1,) or (batch_size, 1)
+        # print("lfinger_disp shape:", lfinger_disp.shape)     # Expected shape: (1,) or (batch_size, 1))
+
+
+
         
         # The achieved goal is the cube position
         achieved_goal = cube_pos.clone()
@@ -170,11 +175,30 @@ class FrankaPickPlaceDDPG_Env:
         }
     
     def compute_reward(self, achieved_goal, desired_goal, info=None):
-        """Compute reward for HER"""
+        """Compute reward for HER, handling both NumPy arrays and PyTorch tensors"""
+
+        # Convert NumPy arrays to PyTorch tensors
+        if isinstance(achieved_goal, np.ndarray):
+            achieved_goal = torch.tensor(achieved_goal, dtype=torch.float32)
+        if isinstance(desired_goal, np.ndarray):
+            desired_goal = torch.tensor(desired_goal, dtype=torch.float32)
+
+        # Ensure both tensors are float and on the same device
+        achieved_goal = achieved_goal.to(torch.float32)
+        desired_goal = desired_goal.to(torch.float32)
+
+        if achieved_goal.device != desired_goal.device:
+            desired_goal = desired_goal.to(achieved_goal.device)
+
+        # Compute distance
         distances = torch.norm(achieved_goal - desired_goal, dim=-1)
-        print("DISTANCE: " + str(distances))
-        print("REWARD IS: " + str(-(distances > 0.05).float()))
-        return -(distances > 0.05).float()   # -1 if not reached, 0 if reached
+        # print("DISTANCE:", distances)
+        
+        # Compute reward
+        reward = -(distances > 0.05).float()
+        # print("REWARD IS:", reward)
+
+        return reward
     
 
     def _check_done(self):
@@ -191,8 +215,8 @@ class FrankaPickPlaceDDPG_Env:
     def step(self, action):
         # Convert action to tensor if it's numpy
         if isinstance(action, np.ndarray):
-            print("ACTION: " + str(action))
-            print("ACTION SHAPE: " + str(action.shape))
+            # print("ACTION: " + str(action))
+            # print("ACTION SHAPE: " + str(action.shape))
             action = torch.from_numpy(action).to(self.device)
         
         # Reshape action if needed

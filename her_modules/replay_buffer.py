@@ -5,11 +5,14 @@ from copy import deepcopy as dc
 
 class ReplayBuffer:
     def __init__(self, env_params, buffer_size, device='cpu'):
+        self.clip_value = 200
         self.env_params = env_params
         self.T = env_params['max_timesteps']
         self.size = buffer_size // self.T
         print("SIZE IS: " + str(self.size))
         self.device = device
+        replay_k = 4
+        self.future_p = 1 - (1. / (1 + replay_k))
         
         self.buffers = {
             'obs': torch.empty(
@@ -43,6 +46,8 @@ class ReplayBuffer:
     def store_episode(self, episode_batch):
         print("EPISODE BATCH")
         print(len(episode_batch))
+        
+        #shape of each is [2,51, 15 or 3 or 4]
         mb_obs, mb_ag, mb_g, mb_actions = episode_batch
         print("JUST OBS SHAPE: " + str(mb_obs.shape))
         print(self.buffers['obs'].shape)
@@ -52,6 +57,7 @@ class ReplayBuffer:
         batch_size = mb_obs.shape[0]
         
         with self.lock:
+            # should be like [0 1] or something
             idxs = self._get_storage_idx(batch_size)
             if isinstance(mb_obs, np.ndarray):
                 mb_obs = torch.FloatTensor(mb_obs).to(self.device)
@@ -59,12 +65,19 @@ class ReplayBuffer:
                 mb_g = torch.FloatTensor(mb_g).to(self.device)
                 mb_actions = torch.FloatTensor(mb_actions).to(self.device)
             
+            print("OBS IDX SHAPE: " + str(self.buffers['obs'][idxs].shape))
+            print("MB OBS SHAPE: " + str(mb_obs.shape))
+            #idx shape is: [2, 51, 15] or something since
             self.buffers['obs'][idxs] = mb_obs
             self.buffers['ag'][idxs] = mb_ag
             self.buffers['g'][idxs] = mb_g
             self.buffers['actions'][idxs] = mb_actions
             self.n_transitions_stored += batch_size * self.T
 
+    def clip_obs(self, obs):
+        return np.clip(obs, -self.clip_value, self.clip_value)
+
+ 
 
     #TODO INTEGRATE THIS METHOD INTO THE CODE, ie. need to make the code implement batching
     #ALSO IMPLEMENT THE STATE AND GOAL NORMALIZERS 
@@ -73,7 +86,8 @@ class ReplayBuffer:
         # Each value is a numpy array of shape (num_episodes, num_timesteps, feature_dim)
         
         num_episodes = batch['obs'].shape[0]
-        max_timesteps = batch['obs'].shape[1]
+        max_timesteps = batch['g'].shape[1]
+        print("MAX TIMESTEPS: " + str(max_timesteps))
         size = max_timesteps  # or whatever sample size you want
         
         # Randomly select episodes and timesteps
