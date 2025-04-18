@@ -31,9 +31,9 @@ class DDPG_HER_AGENT:
         
         self.batch_size = 256
         self.gamma = 0.98
-        self.tau = 0.05
+        self.tau = 0.005   #used to be 0.05
         self.checkpoint_path = checkpoint_path
-        self.clip_range = 5
+        self.clip_range = 5  #used to be 5
         
         self.o_norm = Normalizer(size=env_params['obs'], default_clip_range=self.clip_range)
         self.g_norm = Normalizer(size=env_params['goal'], default_clip_range=self.clip_range)
@@ -49,12 +49,11 @@ class DDPG_HER_AGENT:
             random_actions = (2 * torch.rand(4, dtype=torch.float32) - 1).to(action.device)
 
             if train_mode:
-                noise = torch.randn_like(action) * 0.1
+                noise = torch.randn_like(action) * 0.25 #used to be 0.1
                 action = torch.clamp(action + noise, -1, 1)
             #n -> num trials, p -> prob of 1, size -> num experiments
             #   returns number of times it was 1
-            if np.random.binomial(1, 0.9, 1)[0] == 0:
-                # print("ACTUALLY RANDOM")
+            if np.random.binomial(1, 0.3, 1)[0] == 0:   #try choose random 70% time
                 action += (random_actions - action)
             return action
     

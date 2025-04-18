@@ -10,6 +10,7 @@ from numpy import random
 # fix stuff accordingly. 
 class FrankaPickPlaceDDPG_Env:
     def __init__(self, vis=False, device='mps', num_envs=1):
+        self.goal_index = 0
         self.device = device
         self.action_space = 4  # end effector x, y, z, finger disp.
         # gripper pos (3) + block pos (3) + block to gripper (3) + finger displacement (2)
@@ -87,6 +88,9 @@ class FrankaPickPlaceDDPG_Env:
         # Pre-generate goal positions
         self.target_poses = []
         default_pos = np.array([0.7, 0.0, 0])
+        
+        
+        #random version
         for _ in range(2000):
             # default range
             # offset = np.array([random.rand() * 0.2, random.rand() * 0.6 - 0.3, 0.35 * random.rand() + 0.1])
@@ -96,7 +100,22 @@ class FrankaPickPlaceDDPG_Env:
             target_pos = default_pos + offset
             target_pos = np.repeat(target_pos[np.newaxis], self.num_envs, axis=0)
             self.target_poses.append(target_pos)
-        self.goal_index = 0
+        
+        
+        # offsets = [
+        #     np.array([0.10, -0.20, 0.30]),  # max in all directions
+        #     np.array([0.00,  0.20, 0.28]),  # min x, max y
+        #     np.array([0.09, -0.18, 0.12]),  # high x, low y, low z
+        #     np.array([0.01,  0.15, 0.25]),  # low x, high y
+        # ]
+
+        # # Cycle through these offsets for each iteration
+        # for i in range(2000):
+        #     offset = offsets[i % 4]  # Cycle through the 4 offsets
+        #     target_pos = default_pos + offset
+        #     target_pos = np.repeat(target_pos[np.newaxis], self.num_envs, axis=0)
+        #     self.target_poses.append(target_pos)
+        # self.goal_index = 0
         
     def reset(self):
         self.build_env()
@@ -107,6 +126,8 @@ class FrankaPickPlaceDDPG_Env:
         self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
         
         # Set new goal position
+        print("GOAL INDEX: " + str(self.goal_index))
+        print("INDEX: " + str(self.goal_index % len(self.target_poses)))
         goal_pos = self.target_poses[self.goal_index % len(self.target_poses)]
         self.goal_target.set_pos(goal_pos, envs_idx=self.envs_idx)  #we already did the repeat earlier
         self.goal_index += 1
@@ -177,6 +198,8 @@ class FrankaPickPlaceDDPG_Env:
             'achieved_goal': achieved_goal,
             'desired_goal': goal_pos
         }
+        
+        
     
     def compute_reward(self, achieved_goal, desired_goal, info=None):
         """Compute reward for HER, handling both NumPy arrays and PyTorch tensors"""
@@ -202,9 +225,10 @@ class FrankaPickPlaceDDPG_Env:
         # Compute reward
         reward = -(distances > 0.08).float()
         any_zero = (distances.eq(0)).any()
+        print("REWARD IS :", str(reward))
 
         if any_zero:
-            print("REWARD IS:", reward)
+            print("FOUND ZERO: IS:", reward)
             print(distances)
         return reward
     
@@ -224,7 +248,7 @@ class FrankaPickPlaceDDPG_Env:
     #TODO: Check if the action space is accurates -> compare with their code and try to see if 
     #   you are able to run their demo 
     def step(self, action):
-        # print("ACTION: " + str(action))
+        print("ACTION: " + str(action))
 
         # Convert action to tensor if it's numpy
         if isinstance(action, np.ndarray):
@@ -237,14 +261,17 @@ class FrankaPickPlaceDDPG_Env:
             action = action.unsqueeze(0)
         # Scale actions to real-world units
         delta_pos = action[:, :3] * 0.05  # 5cm max movement
-        gripper_cmd = action[:, 3]        # [-1, 1]
+        
+        action[:, 3] = -1  #force close, TODO: UNcomment this
+        gripper_cmd = action[:, 3]
+
         # print(gripper_cmd)
         
         # Update position
         self.pos += delta_pos
         
         # Continuous gripper control (0=closed, 0.04=open)
-        finger_width = (gripper_cmd + 1) * 0.02  # Map [-1,1]→[0,0.04]
+        finger_width = (1 + gripper_cmd) * 0.02  # Map [-1,1]→[0,0.04]
         finger_pos = torch.stack([finger_width, finger_width], dim=1)  # Both fingers
         
         # Inverse kinematics
@@ -264,8 +291,12 @@ class FrankaPickPlaceDDPG_Env:
         
         # Calculate reward
         reward = self.compute_reward(obs['achieved_goal'], obs['desired_goal'])
-        done = self._check_done()
-        # print(done)
+        done = (reward == 0)
+
+        print("REWARD VS DONE")
+        print(reward)
+        print(done)
+
         if (done == 1).any():
             print("IS DONE")
 

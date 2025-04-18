@@ -45,10 +45,10 @@ class TrainDDPG:
             load=args.load
         )
         
-        self.MAX_EPOCHS = 10 #TODO: Should be 50
-        self.MAX_CYCLES = 1 #TODO: SHould be 50
-        self.MAX_EPISODES = 2
-        self.num_updates = 5 #TODO: should be 40
+        self.MAX_EPOCHS = 50 #TODO: Should be 50
+        self.MAX_CYCLES = 4 #TODO: SHould be 50
+        self.MAX_EPISODES = 50
+        self.num_updates = 40 #TODO: should be 40
         
         self.t_success_rate = []
         self.total_ac_loss = []
