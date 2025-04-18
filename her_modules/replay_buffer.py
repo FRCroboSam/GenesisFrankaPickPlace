@@ -49,10 +49,10 @@ class ReplayBuffer:
         
         #shape of each is [2,51, 15 or 3 or 4]
         mb_obs, mb_ag, mb_g, mb_actions = episode_batch
-        print("JUST OBS SHAPE: " + str(mb_obs.shape))
-        print(self.buffers['obs'].shape)
-        print("OBS SHAPE: " + str(mb_obs.shape))
-        print("AG SHAPE: " + str(mb_ag.shape))
+        # print("JUST OBS SHAPE: " + str(mb_obs.shape))
+        # print(self.buffers['obs'].shape)
+        # print("OBS SHAPE: " + str(mb_obs.shape))
+        # print("AG SHAPE: " + str(mb_ag.shape))
 
         batch_size = mb_obs.shape[0]
         
@@ -65,8 +65,8 @@ class ReplayBuffer:
                 mb_g = torch.FloatTensor(mb_g).to(self.device)
                 mb_actions = torch.FloatTensor(mb_actions).to(self.device)
             
-            print("OBS IDX SHAPE: " + str(self.buffers['obs'][idxs].shape))
-            print("MB OBS SHAPE: " + str(mb_obs.shape))
+            # print("OBS IDX SHAPE: " + str(self.buffers['obs'][idxs].shape))
+            # print("MB OBS SHAPE: " + str(mb_obs.shape))
             #idx shape is: [2, 51, 15] or something since
             self.buffers['obs'][idxs] = mb_obs
             self.buffers['ag'][idxs] = mb_ag
@@ -87,7 +87,7 @@ class ReplayBuffer:
         
         num_episodes = batch['obs'].shape[0]
         max_timesteps = batch['g'].shape[1]
-        print("MAX TIMESTEPS: " + str(max_timesteps))
+        # print("MAX TIMESTEPS: " + str(max_timesteps))
         size = max_timesteps  # or whatever sample size you want
         
         # Randomly select episodes and timesteps
@@ -138,10 +138,15 @@ class ReplayBuffer:
         future_offset = future_offset.astype(int)
         future_t = (t_samples + 1 + future_offset)[her_indexes]
         future_ag = temp_buffers['ag'][episode_idxs[her_indexes], future_t].cpu().numpy()
-        transitions['g'][her_indexes] = future_ag
         
+        #relabel goals 
+        transitions['g'][her_indexes] = future_ag
+        print("CALCULATING REWARD DURING TRAIN")
+        
+        
+        #This is where we compute reward of relabeled her transitions
         transitions['r'] = np.expand_dims(
-            self.env_params['reward_func'](transitions['ag_next'], transitions['g'], None), 
+            self.env_params['reward_func'](transitions['g'], transitions['ag_next'],  None), 
             axis=1
         )
         return transitions
@@ -159,7 +164,7 @@ class ReplayBuffer:
             idx = np.random.randint(0, self.size, inc)
         
         self.current_size = min(self.size, self.current_size + inc)
-        print("STORAGE IDX IS: " + str(idx))
+        # print("STORAGE IDX IS: " + str(idx))
         return idx
 
     def __len__(self):

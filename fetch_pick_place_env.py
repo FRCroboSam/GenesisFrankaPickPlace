@@ -87,8 +87,12 @@ class FrankaPickPlaceDDPG_Env:
         # Pre-generate goal positions
         self.target_poses = []
         default_pos = np.array([0.7, 0.0, 0])
-        for _ in range(50):
-            offset = np.array([random.rand() * 0.2, random.rand() * 0.6 - 0.3, 0.35 * random.rand() + 0.1])
+        for _ in range(2000):
+            # default range
+            # offset = np.array([random.rand() * 0.2, random.rand() * 0.6 - 0.3, 0.35 * random.rand() + 0.1])
+            #less picky range
+            offset = np.array([random.rand() * 0.1, random.rand() * 0.4 - 0.2, 0.2 * random.rand() + 0.1])
+
             target_pos = default_pos + offset
             target_pos = np.repeat(target_pos[np.newaxis], self.num_envs, axis=0)
             self.target_poses.append(target_pos)
@@ -97,7 +101,7 @@ class FrankaPickPlaceDDPG_Env:
     def reset(self):
         self.build_env()
         
-        # Reset cube position
+        # Reset cube position -> forward, side to side, vertical 
         cube_pos = np.array([0.65, 0.0, 0.02])
         cube_pos = np.repeat(cube_pos[np.newaxis], self.num_envs, axis=0)
         self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
@@ -176,6 +180,7 @@ class FrankaPickPlaceDDPG_Env:
     
     def compute_reward(self, achieved_goal, desired_goal, info=None):
         """Compute reward for HER, handling both NumPy arrays and PyTorch tensors"""
+        # print("DESIRED GOAL: " + str(desired_goal))
 
         # Convert NumPy arrays to PyTorch tensors
         if isinstance(achieved_goal, np.ndarray):
@@ -195,9 +200,12 @@ class FrankaPickPlaceDDPG_Env:
         # print("DISTANCE:", distances)
         
         # Compute reward
-        reward = -(distances > 0.05).float()
-        # print("REWARD IS:", reward)
+        reward = -(distances > 0.08).float()
+        any_zero = (distances.eq(0)).any()
 
+        if any_zero:
+            print("REWARD IS:", reward)
+            print(distances)
         return reward
     
 
@@ -205,14 +213,19 @@ class FrankaPickPlaceDDPG_Env:
         """Returns done flags for all environments as a tensor [num_envs, 1]"""
         goal_pos = self.goal_target.get_pos()  # shape [num_envs, 3]
         cube_pos = self.cube.get_pos()  # shape [num_envs, 3]
-        
+        # print("GOAL POS IS: " + str(goal_pos))
+
         # Compute distances for all environments
         distances = torch.norm(cube_pos - goal_pos, dim=1, keepdim=True)  # shape [num_envs, 1]
         
         # Return boolean tensor indicating which envs are done
-        return distances < 0.05  # shape [num_envs, 1]
-        
+        return distances < 0.08  # shape [num_envs, 1]
+    
+    #TODO: Check if the action space is accurates -> compare with their code and try to see if 
+    #   you are able to run their demo 
     def step(self, action):
+        # print("ACTION: " + str(action))
+
         # Convert action to tensor if it's numpy
         if isinstance(action, np.ndarray):
             # print("ACTION: " + str(action))
@@ -222,10 +235,10 @@ class FrankaPickPlaceDDPG_Env:
         # Reshape action if needed
         if len(action.shape) == 1:
             action = action.unsqueeze(0)
-            
         # Scale actions to real-world units
         delta_pos = action[:, :3] * 0.05  # 5cm max movement
         gripper_cmd = action[:, 3]        # [-1, 1]
+        # print(gripper_cmd)
         
         # Update position
         self.pos += delta_pos
@@ -248,11 +261,15 @@ class FrankaPickPlaceDDPG_Env:
         
         # Get new observation
         obs = self._get_obs()
-        done = self._check_done()
         
         # Calculate reward
         reward = self.compute_reward(obs['achieved_goal'], obs['desired_goal'])
-        
+        done = self._check_done()
+        # print(done)
+        if (done == 1).any():
+            print("IS DONE")
+
+
         info = {
             'is_success': done,
             'achieved_goal': obs['achieved_goal'],

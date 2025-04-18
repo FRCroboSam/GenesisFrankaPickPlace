@@ -8,6 +8,9 @@ import torch
 
 # need to bound actor values iwth tanh
 
+
+
+
 class DDPG_Actor(nn.Module):
     def __init__(self, env_params):
         super(DDPG_Actor, self).__init__()
@@ -25,6 +28,8 @@ class DDPG_Actor(nn.Module):
     def forward(self, x):
         return torch.tanh(self.network(x))
     
+    
+#returns expected reward given actor and critic
 class DDPG_Critic(nn.Module):
     def __init__(self, env_params):
         super(DDPG_Critic, self).__init__()

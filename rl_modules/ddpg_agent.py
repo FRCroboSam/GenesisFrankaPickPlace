@@ -45,9 +45,17 @@ class DDPG_HER_AGENT:
         with torch.set_grad_enabled(train_mode):
             input_tensor = torch.cat([state, goal], dim=-1)
             action = self.actor(input_tensor)
+            
+            random_actions = (2 * torch.rand(4, dtype=torch.float32) - 1).to(action.device)
+
             if train_mode:
                 noise = torch.randn_like(action) * 0.1
                 action = torch.clamp(action + noise, -1, 1)
+            #n -> num trials, p -> prob of 1, size -> num experiments
+            #   returns number of times it was 1
+            if np.random.binomial(1, 0.9, 1)[0] == 0:
+                # print("ACTUALLY RANDOM")
+                action += (random_actions - action)
             return action
     
     #shape of mb -> (batch size, time_steps, feature dim)
@@ -76,7 +84,11 @@ class DDPG_HER_AGENT:
         
 
     def train(self):
+        print("TRAINING")
         # TODO: CHECK THIS IS CORRECT< MAKE SURE IT DOES HER TRANSITIONS AND ALSO DO NORMALIZATRION
+        
+        # performs HER relabeling by relabeling goals with future achieved goals 
+        # transitions include the newly calculated rewards
         transitions = self.buffer.sample(self.batch_size)
         
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
@@ -89,11 +101,15 @@ class DDPG_HER_AGENT:
         
         # Critic update
         with torch.no_grad():
+            #target_Q
             next_input = torch.cat([obs_next, g], dim=-1)
-            target_actions = self.actor_target(next_input)
-            target_Q = self.critic_target(next_input, target_actions)
-            target_Q = rewards + (1 - (rewards == 0).float()) * self.gamma * target_Q
-            
+            target_actions = self.actor_target(next_input) # -> returns actions
+            target_Q = self.critic_target(next_input, target_actions) #-> expected reward
+            #expected future reward 
+            # target_Q = rewards + (1 - (rewards == 0).float()) * self.gamma * target_Q
+            target_Q = rewards + self.gamma * target_Q      #current reward + expected future reward 
+            target_Q = torch.clamp(target_Q, -1 / (1 - self.gamma), 0)
+
         current_input = torch.cat([obs, g], dim=-1)
         current_Q = self.critic(current_input, actions)
         critic_loss = nn.MSELoss()(current_Q, target_Q)

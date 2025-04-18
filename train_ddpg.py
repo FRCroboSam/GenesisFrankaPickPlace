@@ -45,10 +45,10 @@ class TrainDDPG:
             load=args.load
         )
         
-        self.MAX_EPOCHS = 5 #TODO: Should be 50
+        self.MAX_EPOCHS = 10 #TODO: Should be 50
         self.MAX_CYCLES = 1 #TODO: SHould be 50
-        self.MAX_EPISODES = 1
-        self.num_updates = 1 #TODO: should be 40
+        self.MAX_EPISODES = 2
+        self.num_updates = 5 #TODO: should be 40
         
         self.t_success_rate = []
         self.total_ac_loss = []
@@ -75,6 +75,9 @@ class TrainDDPG:
         #TODO: check if this is the right loop order
         """Exactly matches HER pseudocode with proper tensor handling"""
         # Initialize - sample goal g and initial state s0
+        print("RUNNING EPISODE")
+        
+        
         obs_dict = self.env.reset()
         state = obs_dict['observation']
         goal = obs_dict['desired_goal']
@@ -89,6 +92,7 @@ class TrainDDPG:
             state = obs_dict['observation']
             goal = obs_dict['desired_goal']
             achieved_goal = obs_dict['achieved_goal']
+        print("STARTING GOAL IS: " + str(goal))
         
         for t in range(self.env_params['max_timesteps']):
             with torch.no_grad():
@@ -104,16 +108,18 @@ class TrainDDPG:
             next_obs_dict, _, done, _ = self.env.step(action)
             state = next_obs_dict['observation']
             achieved_goal = next_obs_dict['achieved_goal']
-            
+            if done.any():
+                print("ONE OF THEM IS DONE")
             if done.all():
                 break
+            
         
         ep_obs.append(state.clone().cpu())
         ep_ag.append(achieved_goal.clone().cpu())
         # ep_g.append(goal.clone().cpu()) #keep this if u want shape 51
         # ep_actions.append(action.copy())
-        print("PRINTING EP OBS")
-        print(str(ep_obs))
+        # print("PRINTING EP OBS")
+        # print(str(ep_obs))
         #TODO: FIGURE out how to 
         ep_obs = np.array(ep_obs)
         ep_ag = np.array(ep_ag)
