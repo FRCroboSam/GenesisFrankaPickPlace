@@ -6,7 +6,12 @@ from rl_modules.ddpg_models import DDPG_Actor, DDPG_Critic
 from her_modules.replay_buffer import ReplayBuffer
 from rl_modules.normalizer import Normalizer
 
-
+#TODOS:
+#   overall pretrain is better now -> higher randomization
+#   figure out why policy prefers going to the left  -> see if u could make it prefer right
+#   review each step with the actual code of the thing esp params
+#   check normalization code 
+#   worst case -> start just training it to move the arm close to the goal 
 
 #TODO: REMOVe all the unnecessary print statements 
 #   figure out why reward isn't improving: mmore normalization?
@@ -41,11 +46,10 @@ class DDPG_HER_AGENT:
         if load:
             self.load_checkpoint()
 
-    def select_action(self, state, goal, train_mode=True):
+    def select_action(self, state, goal, done_mask=None, train_mode=True):
         with torch.set_grad_enabled(train_mode):
             input_tensor = torch.cat([state, goal], dim=-1)
             action = self.actor(input_tensor)
-            
             random_actions = (2 * torch.rand(4, dtype=torch.float32) - 1).to(action.device)
 
             if train_mode:
@@ -53,8 +57,15 @@ class DDPG_HER_AGENT:
                 action = torch.clamp(action + noise, -1, 1)
             #n -> num trials, p -> prob of 1, size -> num experiments
             #   returns number of times it was 1
-            if np.random.binomial(1, 0.3, 1)[0] == 0:   #try choose random 70% time
+            if np.random.binomial(1, 0.4, 1)[0] == 0:   #try choose random 70% time
                 action += (random_actions - action)
+                
+            #make environments that are done not do anything
+            if not done_mask is None:
+                print("HAS A DONE MASK")
+                achieved_mask = done_mask.to(action.device)
+                action = torch.where(achieved_mask.unsqueeze(-1), torch.zeros_like(action), action)
+            print("ACTION: " + str(action))
             return action
     
     #shape of mb -> (batch size, time_steps, feature dim)

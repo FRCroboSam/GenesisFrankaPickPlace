@@ -248,7 +248,7 @@ class FrankaPickPlaceDDPG_Env:
     #TODO: Check if the action space is accurates -> compare with their code and try to see if 
     #   you are able to run their demo 
     def step(self, action):
-        print("ACTION: " + str(action))
+        # print("ACTION: " + str(action))
 
         # Convert action to tensor if it's numpy
         if isinstance(action, np.ndarray):

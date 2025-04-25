@@ -46,8 +46,8 @@ class TrainDDPG:
         )
         
         self.MAX_EPOCHS = 50 #TODO: Should be 50
-        self.MAX_CYCLES = 4 #TODO: SHould be 50
-        self.MAX_EPISODES = 50
+        self.MAX_CYCLES = 1 #TODO: SHould be 50
+        self.MAX_EPISODES = 1 #50
         self.num_updates = 40 #TODO: should be 40
         
         self.t_success_rate = []
@@ -82,7 +82,7 @@ class TrainDDPG:
         state = obs_dict['observation']
         goal = obs_dict['desired_goal']
         achieved_goal = obs_dict['achieved_goal']
-        
+        previous_done = None
         #TODO: CHANGE THESE TO BE EPISODES
         ep_obs, ep_ag, ep_g, ep_actions = [], [], [], []
         
@@ -96,9 +96,9 @@ class TrainDDPG:
         
         for t in range(self.env_params['max_timesteps']):
             with torch.no_grad():
-                action = self.agent.select_action(
-                   state=state, goal=goal
-                ).cpu().numpy()
+                    action = self.agent.select_action(
+                    state=state, goal=goal, done_mask=previous_done
+                    ).cpu().numpy()
             
             ep_obs.append(state.clone().cpu())
             ep_ag.append(achieved_goal.clone().cpu())
@@ -108,10 +108,17 @@ class TrainDDPG:
             next_obs_dict, _, done, _ = self.env.step(action)
             state = next_obs_dict['observation']
             achieved_goal = next_obs_dict['achieved_goal']
+            
+            
+            #TODO: make a policy smart so that when it achieves a goal in an environment
+                #it knows to not do anything -> look at pseudocode
+            done[0] = True
+            previous_done = done
             if done.any():
                 print("ONE OF THEM IS DONE")
             if done.all():
-                break
+                print("ALL OF THEM ARE DONE")
+                # break
             
         
         ep_obs.append(state.clone().cpu())
@@ -145,6 +152,8 @@ class TrainDDPG:
                     mb_ag.append(ep_batch[1])
                     mb_g.append(ep_batch[2])
                     mb_actions.append(ep_batch[3])
+                print("LEN MB_OBS: " + str(len(mb_obs)))
+                print(mb_obs)
                 mb_obs = np.array(mb_obs)
                 mb_ag = np.array(mb_ag)
                 mb_g = np.array(mb_g)
@@ -186,7 +195,8 @@ class TrainDDPG:
     def evaluate(self, num_episodes=10):
         total_success = 0
         total_reward = 0
-        
+        previous_done = None
+
         for _ in range(num_episodes):
             obs_dict = self.env.reset()
             state = obs_dict['observation']
@@ -196,13 +206,14 @@ class TrainDDPG:
                 with torch.no_grad():
                     
                     action = self.agent.select_action(
-                    state=state, goal=goal
+                    state=state, goal=goal, done_mask=previous_done
                     ).cpu().numpy()
                 
                 next_obs_dict, reward, done, info = self.env.step(action)
+                previous_done = done
                 total_reward += reward.mean().item()
                 state = next_obs_dict['observation']
-                
+                done[0] = True
                 if done.all():
                     total_success += info.get('is_success', 0)
                     break
