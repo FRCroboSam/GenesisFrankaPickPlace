@@ -47,7 +47,9 @@ class DDPG_HER_AGENT:
             self.load_checkpoint()
 
     def select_action(self, state, goal, done_mask=None, train_mode=True):
-        with torch.set_grad_enabled(train_mode):
+        #TODO: add state and goal normalizer
+        # with torch.set_grad_enabled(train_mode):
+        with torch.no_grad():
             input_tensor = torch.cat([state, goal], dim=-1)
             action = self.actor(input_tensor)
             random_actions = (2 * torch.rand(4, dtype=torch.float32) - 1).to(action.device)
@@ -55,17 +57,24 @@ class DDPG_HER_AGENT:
             if train_mode:
                 noise = torch.randn_like(action) * 0.25 #used to be 0.1
                 action = torch.clamp(action + noise, -1, 1)
-            #n -> num trials, p -> prob of 1, size -> num experiments
-            #   returns number of times it was 1
-            if np.random.binomial(1, 0.4, 1)[0] == 0:   #try choose random 70% time
-                action += (random_actions - action)
+                #n -> num trials, p -> prob of 1, size -> num experiments
+                #   returns number of times it was 1
+                if np.random.binomial(1, 0.7, 1)[0] == 0:   #try choose random 30% time
+                    # print("CHOOSING RANDOM")
+                    action += (random_actions - action)
+                    # print("ACTION: " + str(action))
+                # else:
+                #     print("ACTION: " + str(action))
+            
                 
             #make environments that are done not do anything
             if not done_mask is None:
-                print("HAS A DONE MASK")
+                if True in done_mask:
+                    print("ACTUALLY DONE")
                 achieved_mask = done_mask.to(action.device)
                 action = torch.where(achieved_mask.unsqueeze(-1), torch.zeros_like(action), action)
-            print("ACTION: " + str(action))
+            # if not train_mode: 
+                # print("MODEL ACTION: " + str(action))
             return action
     
     #shape of mb -> (batch size, time_steps, feature dim)
@@ -148,13 +157,18 @@ class DDPG_HER_AGENT:
     def hard_update(self, source, target):
         target.load_state_dict(source.state_dict())
 
-    def save_checkpoint(self):
+    def save_checkpoint(self, epoch=None):
+        print("ACTUALLY SAVING A CHECKPOINT")
+        if not epoch is None:
+            checkpoint_path = 'models/epoch:' + str(epoch) + self.checkpoint_path
+        else:
+            checkpoint_path = self.checkpoint_path
         torch.save({
             'actor_state': self.actor.state_dict(),
             'critic_state': self.critic.state_dict(),
             'actor_optim_state': self.actor_optim.state_dict(),
             'critic_optim_state': self.critic_optim.state_dict()
-        }, self.checkpoint_path)
+        }, checkpoint_path)
 
     def load_checkpoint(self):
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device)

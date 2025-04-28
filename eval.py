@@ -55,6 +55,7 @@ class EvalDDPG:
     
     def run_evaluation(self):
         i = 0
+        prev_done = None
         while True:
             obs_dict = self.env.reset()
             state = obs_dict['observation']
@@ -63,10 +64,11 @@ class EvalDDPG:
             for t in range(self.env_params['max_timesteps']):
                 with torch.no_grad():
                     action = self.agent.select_action(
-                    state=state, goal=goal
+                    state=state, goal=goal, done_mask=prev_done, train_mode=False
                     ).cpu().numpy()
                 
                 next_obs_dict, _, done, _ = self.env.step(action)
+                prev_done = done
                 state = next_obs_dict['observation']
                 
                 if done.all():

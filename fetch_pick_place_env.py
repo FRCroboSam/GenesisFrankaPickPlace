@@ -9,7 +9,9 @@ from numpy import random
 # once ur done, go through the entire training loop of the DDPG her repo and 
 # fix stuff accordingly. 
 class FrankaPickPlaceDDPG_Env:
-    def __init__(self, vis=False, device='mps', num_envs=1):
+    def __init__(self, vis=False, device='mps', num_envs=1, place_only=False):
+        self.place_only = place_only
+        print("PLACE ONLY: " + str(place_only))
         self.goal_index = 0
         self.device = device
         self.action_space = 4  # end effector x, y, z, finger disp.
@@ -71,19 +73,29 @@ class FrankaPickPlaceDDPG_Env:
         self.motors_dof = torch.arange(7).to(self.device)
         self.fingers_dof = torch.arange(7, 9).to(self.device)
         
-        # Initial franka position
-        franka_pos = torch.tensor([-1.0124, 1.5559, 1.3662, -1.6878, -1.5799, 1.7757, 1.4602, 0.04, 0.04]).to(self.device)
+        # Initial franka position -> change 1.3662 to 1.35 to be lower
+        # [0] Shoulder yaw, [1] Shoulder pitch, [2] Elbow pitch, [3] Forearm yaw, [4] Wrist pitch, [5] Wrist yaw, [6] Wrist pitch (near gripper)
+        franka_pos = torch.tensor([-1.0124, 1.5559, 1.3662, -1.6878, -1.5799, 1.7757, 1.4602, 0.0, 0.0]).to(self.device)
         franka_pos = franka_pos.unsqueeze(0).repeat(self.num_envs, 1) 
         self.franka.set_qpos(franka_pos, envs_idx=self.envs_idx)
         self.scene.step()
 
         self.end_effector = self.franka.get_link("hand")
         
-        # Initial end effector target
-        pos = torch.tensor([0.65, 0.0, 0.135], dtype=torch.float32, device=self.device)
+        # Initial end effector target original 0.135
+        pos = torch.tensor([1.65, -1.2, 0.135], dtype=torch.float32, device=self.device)
         self.pos = pos.unsqueeze(0).repeat(self.num_envs, 1)
         quat = torch.tensor([0, 1, 0, 0], dtype=torch.float32, device=self.device)
         self.quat = quat.unsqueeze(0).repeat(self.num_envs, 1)
+        
+        
+        
+        # if self.place_only:
+        #     pos = torch.tensor([0.65, 0.0, 0.02], dtype=torch.float32, device=self.device)
+        #     self.pos = pos.unsqueeze(0).repeat(self.num_envs, 1)
+        #     quat = torch.tensor([0, 1, 0, 0], dtype=torch.float32, device=self.device)
+        #     self.quat = quat.unsqueeze(0).repeat(self.num_envs, 1)
+            
         
         # Pre-generate goal positions
         self.target_poses = []
@@ -91,11 +103,11 @@ class FrankaPickPlaceDDPG_Env:
         
         
         #random version
-        for _ in range(2000):
+        for _ in range(12):
             # default range
-            # offset = np.array([random.rand() * 0.2, random.rand() * 0.6 - 0.3, 0.35 * random.rand() + 0.1])
+            offset = np.array([random.rand() * 0.2, random.rand() * 0.6 - 0.3, 0.35 * random.rand() + 0.1])
             #less picky range
-            offset = np.array([random.rand() * 0.1, random.rand() * 0.4 - 0.2, 0.2 * random.rand() + 0.1])
+            # offset = np.array([random.rand() * 0.1, random.rand() * 0.4 - 0.2, 0.2 * random.rand() + 0.1])
 
             target_pos = default_pos + offset
             target_pos = np.repeat(target_pos[np.newaxis], self.num_envs, axis=0)
@@ -118,13 +130,18 @@ class FrankaPickPlaceDDPG_Env:
         # self.goal_index = 0
         
     def reset(self):
-        self.build_env()
         
-        # Reset cube position -> forward, side to side, vertical 
-        cube_pos = np.array([0.65, 0.0, 0.02])
+        # Reset cube position -> forward, side to side, vertical
+        if not self.place_only: 
+            cube_pos = np.array([0.65, 0.0, 0.02])
+        else:
+            cube_pos = np.array([0.65, 0.0, 0.06])
+
         cube_pos = np.repeat(cube_pos[np.newaxis], self.num_envs, axis=0)
         self.cube.set_pos(cube_pos, envs_idx=self.envs_idx)
         
+        self.build_env()
+
         # Set new goal position
         print("GOAL INDEX: " + str(self.goal_index))
         print("INDEX: " + str(self.goal_index % len(self.target_poses)))
@@ -133,8 +150,9 @@ class FrankaPickPlaceDDPG_Env:
         self.goal_index += 1
         
         # Reset end effector position
-        self.pos = torch.tensor([0.65, 0.0, 0.135], dtype=torch.float32, device=self.device)
-        self.pos = self.pos.unsqueeze(0).repeat(self.num_envs, 1)
+        
+        # self.pos = torch.tensor([0.65, 0.0, 0.135], dtype=torch.float32, device=self.device)
+        # self.pos = self.pos.unsqueeze(0).repeat(self.num_envs, 1)
         
         # Get initsial observation
         obs = self._get_obs()
@@ -225,7 +243,7 @@ class FrankaPickPlaceDDPG_Env:
         # Compute reward
         reward = -(distances > 0.08).float()
         any_zero = (distances.eq(0)).any()
-        print("REWARD IS :", str(reward))
+        print("DISTANCES: " + str(distances) + " REWARD IS :", str(reward))
 
         if any_zero:
             print("FOUND ZERO: IS:", reward)
@@ -260,7 +278,10 @@ class FrankaPickPlaceDDPG_Env:
         if len(action.shape) == 1:
             action = action.unsqueeze(0)
         # Scale actions to real-world units
-        delta_pos = action[:, :3] * 0.05  # 5cm max movement
+        delta_pos = action[:, :3] * 0.05  #should be 5cm max movement
+        # delta_pos[:, 0] = 0   #TODO: debug arm moving right 
+        # delta_pos[:, 1] = 0.5    # - moves left, + moves right
+        # delta_pos[:, 2] = 0
         
         action[:, 3] = -1  #force close, TODO: UNcomment this
         gripper_cmd = action[:, 3]
@@ -269,6 +290,7 @@ class FrankaPickPlaceDDPG_Env:
         
         # Update position
         self.pos += delta_pos
+        # print(self.pos)
         
         # Continuous gripper control (0=closed, 0.04=open)
         finger_width = (1 + gripper_cmd) * 0.02  # Map [-1,1]→[0,0.04]
@@ -283,6 +305,7 @@ class FrankaPickPlaceDDPG_Env:
         
         # Execute movements
         self.franka.control_dofs_position(self.qpos[:, :-2], self.motors_dof, self.envs_idx)
+        # if not self.place_only:
         self.franka.control_dofs_position(finger_pos, self.fingers_dof, self.envs_idx)
         self.scene.step()
         
@@ -293,9 +316,9 @@ class FrankaPickPlaceDDPG_Env:
         reward = self.compute_reward(obs['achieved_goal'], obs['desired_goal'])
         done = (reward == 0)
 
-        print("REWARD VS DONE")
-        print(reward)
-        print(done)
+        # print("REWARD VS DONE")
+        # print(reward)
+        # print(done)
 
         if (done == 1).any():
             print("IS DONE")

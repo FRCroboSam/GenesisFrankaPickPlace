@@ -25,14 +25,14 @@ class TrainDDPG:
             'avg_rewards': []
         }
         self.args = args
-        self.env = FrankaPickPlaceDDPG_Env(vis=args.vis, device=args.device, num_envs=args.num_envs)
+        self.env = FrankaPickPlaceDDPG_Env(vis=args.vis, device=args.device, num_envs=args.num_envs, place_only=args.place_only)
         
         self.env_params = {
             'obs': self.env.state_dim,
             'goal': self.env.goal_dim,
             'action': self.env.action_dim,
             'action_max': 1.0,
-            'max_timesteps': 50,
+            'max_timesteps': 150,   #should be 50 by default
             'num_envs': args.num_envs,
             'reward_func': self.env.compute_reward
         }
@@ -46,8 +46,8 @@ class TrainDDPG:
         )
         
         self.MAX_EPOCHS = 50 #TODO: Should be 50
-        self.MAX_CYCLES = 1 #TODO: SHould be 50
-        self.MAX_EPISODES = 1 #50
+        self.MAX_CYCLES = 50 #TODO: SHould be 50
+        self.MAX_EPISODES = 16 #50
         self.num_updates = 40 #TODO: should be 40
         
         self.t_success_rate = []
@@ -104,7 +104,7 @@ class TrainDDPG:
             ep_ag.append(achieved_goal.clone().cpu())
             ep_g.append(goal.clone().cpu()) 
             ep_actions.append(action.copy())
-            
+            print("ACTION SHAPE: " + str(action.shape))
             next_obs_dict, _, done, _ = self.env.step(action)
             state = next_obs_dict['observation']
             achieved_goal = next_obs_dict['achieved_goal']
@@ -112,7 +112,7 @@ class TrainDDPG:
             
             #TODO: make a policy smart so that when it achieves a goal in an environment
                 #it knows to not do anything -> look at pseudocode
-            done[0] = True
+            # done[0] = True
             previous_done = done
             if done.any():
                 print("ONE OF THEM IS DONE")
@@ -152,8 +152,8 @@ class TrainDDPG:
                     mb_ag.append(ep_batch[1])
                     mb_g.append(ep_batch[2])
                     mb_actions.append(ep_batch[3])
-                print("LEN MB_OBS: " + str(len(mb_obs)))
-                print(mb_obs)
+                # print("LEN MB_OBS: " + str(len(mb_obs)))
+                # print(mb_obs)
                 mb_obs = np.array(mb_obs)
                 mb_ag = np.array(mb_ag)
                 mb_g = np.array(mb_g)
@@ -188,7 +188,7 @@ class TrainDDPG:
                   f"Time:{time.time()-start_time:.1f}s")
             
             # if epoch % 10 == 0:
-            self.agent.save_checkpoint()
+            self.agent.save_checkpoint(epoch=epoch)
             self._log_metrics(epoch, success_rate, epoch_actor_loss, epoch_critic_loss, avg_reward)
         self.plot_metrics()
 
@@ -196,6 +196,7 @@ class TrainDDPG:
         total_success = 0
         total_reward = 0
         previous_done = None
+        print("BEGINNING THE EVALUATION")
 
         for _ in range(num_episodes):
             obs_dict = self.env.reset()
@@ -206,18 +207,26 @@ class TrainDDPG:
                 with torch.no_grad():
                     
                     action = self.agent.select_action(
-                    state=state, goal=goal, done_mask=previous_done
+                    state=state, goal=goal, done_mask=previous_done, train_mode=False
                     ).cpu().numpy()
                 
                 next_obs_dict, reward, done, info = self.env.step(action)
                 previous_done = done
                 total_reward += reward.mean().item()
                 state = next_obs_dict['observation']
-                done[0] = True
+                # done[0] = True
+                if done.any():
+                    print("EVAL HIT SUCCESS in ONE ENVIRONMENT")
                 if done.all():
-                    total_success += info.get('is_success', 0)
-                    break
-        
+                    print("ALL SUCCESS")
+                    success = info.get('is_success', 0)
+                    if hasattr(success, 'item'):  # likely a tensor
+                        success = float(success.item())
+                        
+                    total_success += success
+                    # break
+        print("AVG SUCCESS: " + str(total_success / num_episodes))
+        print("REWARD: " + str(total_reward / num_episodes))
         return total_success / num_episodes, total_reward / num_episodes
 
     def _log_metrics(self, epoch, success_rate, actor_loss, critic_loss, avg_reward):
@@ -268,9 +277,11 @@ class TrainDDPG:
         plt.close()
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--place_only", action="store_true")
     parser.add_argument("--vis", action="store_true", help="Enable visualization")
     parser.add_argument("--device", default="cpu", help="Device to use")
     parser.add_argument("--num_envs", type=int, default=1, help="Number of parallel environments")
+    #todo change this to be in the models folder
     parser.add_argument("--checkpoint_path", default="checkpoint.pth", help="Path to save/load model")
     parser.add_argument("--load", action="store_true", help="Load checkpoint")
     return parser.parse_args()
