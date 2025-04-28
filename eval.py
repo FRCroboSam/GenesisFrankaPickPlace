@@ -15,7 +15,7 @@ gs.init(backend=gs.gpu, precision="32")
 class EvalDDPG:
     def __init__(self, args):
         # super().__init__(args)
-        self.env = FrankaPickPlaceDDPG_Env(vis=args.vis, device=args.device, num_envs=args.num_envs)
+        self.env = FrankaPickPlaceDDPG_Env(vis=args.vis, device=args.device, num_envs=args.num_envs, place_only=args.place_only)
         print("LOADING FROM PATH: " + str(args.load_path))
         self.env_params = {
             'obs': self.env.state_dim,
@@ -76,6 +76,8 @@ class EvalDDPG:
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--place_only", action="store_true")
+
     parser.add_argument("-v", "--vis", action="store_true", default=False, 
                        help="Enable visualization") 
     parser.add_argument("-l", "--load_path", type=str, nargs='?', default=None,

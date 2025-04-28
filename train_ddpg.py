@@ -32,7 +32,7 @@ class TrainDDPG:
             'goal': self.env.goal_dim,
             'action': self.env.action_dim,
             'action_max': 1.0,
-            'max_timesteps': 150,   #should be 50 by default
+            'max_timesteps': 100,   #should be 50 by default
             'num_envs': args.num_envs,
             'reward_func': self.env.compute_reward
         }
@@ -46,8 +46,8 @@ class TrainDDPG:
         )
         
         self.MAX_EPOCHS = 50 #TODO: Should be 50
-        self.MAX_CYCLES = 50 #TODO: SHould be 50
-        self.MAX_EPISODES = 16 #50
+        self.MAX_CYCLES = 2 #TODO: SHould be 50
+        self.MAX_EPISODES = 16 #16
         self.num_updates = 40 #TODO: should be 40
         
         self.t_success_rate = []
@@ -216,6 +216,7 @@ class TrainDDPG:
                 state = next_obs_dict['observation']
                 # done[0] = True
                 if done.any():
+                    total_success += 1
                     print("EVAL HIT SUCCESS in ONE ENVIRONMENT")
                 if done.all():
                     print("ALL SUCCESS")

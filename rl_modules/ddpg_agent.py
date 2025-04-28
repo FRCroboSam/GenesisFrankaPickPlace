@@ -59,7 +59,7 @@ class DDPG_HER_AGENT:
                 action = torch.clamp(action + noise, -1, 1)
                 #n -> num trials, p -> prob of 1, size -> num experiments
                 #   returns number of times it was 1
-                if np.random.binomial(1, 0.7, 1)[0] == 0:   #try choose random 30% time
+                if np.random.binomial(1, 0.6, 1)[0] == 0:   #try choose random 30% time
                     # print("CHOOSING RANDOM")
                     action += (random_actions - action)
                     # print("ACTION: " + str(action))
